@@ -7,7 +7,9 @@ CLIB     	= -L$(GUROBI_HOME)/lib/ -lgurobi65
 OTHERLIB	= -lm -ljansson
 
 SOURCES		= main.c \
-			  json_read.c
+			  json_read.c \
+		  solver.c
+
 
 OBJECTS		= $(SOURCES:.c=.o)
 EXECUTABLES	= tp3s_grb
