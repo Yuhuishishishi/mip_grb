@@ -268,8 +268,25 @@ void buildModel(
 		}
 	}
 
+	/* compatibility */
+	for (int t1 = 0; t1 < numTests; ++t1)
+	{
+		for (int t2 = 0; t2 < t1; ++t2)
+		{
+			if (!rehitRules[t1][t2])
+			{
+				GRBsetdblattrelement(*model, "UB", before(t1,t2), 0.0);
+			}
+
+			if (!rehitRules[t2][t1])
+			{
+				GRBsetdblattrelement(*model, "UB", before(t2,t1), 0.0);
+			}
+		}
+	}
+
 	/* solve the model */
-	
+
 
 	free(ind);
 	free(val);
