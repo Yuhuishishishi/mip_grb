@@ -6,7 +6,7 @@
 #include <stdio.h>
 
 #define usevehicle(v)			v
-#define assigntest(t,v)			numVehicles + numTests*(t) + v
+#define assigntest(t,v)			numVehicles + numVehicles*(t) + v
 #define start(t)				numVehicles + numTests*numVehicles + t
 #define tardiness(t)			numVehicles + numTests*numVehicles + numTests + t
 #define before(t1,t2)			numVehicles + numTests*numVehicles + numTests + numTests + numTests*t1 + t2
@@ -51,6 +51,7 @@ void buildModel(
 			GRBsetdblattrelement(*model, "Obj", col, 0);
 			char vname[MAX_STR_LEN];
 			sprintf(vname, "Assign test %i to vehicle %i", t, v);
+			// printf("%s\n", vname);
 			GRBsetstrattrelement(*model, "VarName", col, vname);
 		}
 	}
@@ -70,7 +71,7 @@ void buildModel(
 	/* initialize variables for tardiness of tests */
 	for (int t=0; t<numTests; ++t)
 	{
-		int col = start(t);
+		int col = tardiness(t);
 		GRBsetcharattrelement(*model, "VType", col, GRB_CONTINUOUS);
 		GRBsetdblattrelement(*model, "Obj", col, 1);
 		GRBsetdblattrelement(*model, "LB", col, 0);
@@ -97,13 +98,14 @@ void buildModel(
 	}
 
 	/* model sense */
-	GRBsetintattr(*model, "ModelSense", 1);
+	GRBsetintattr(*model, "ModelSense", GRB_MINIMIZE);
 
 	/* lazy update */
 	GRBupdatemodel(*model);
 
 
-	int *ind, *val;
+	int *ind;
+	double *val;
 	char sense;
 	double rhs;
 	char cname[MAX_STR_LEN];
@@ -119,7 +121,7 @@ void buildModel(
 	{
 		nonzero = 0;
 
-		sense = GRB_EQAUL;
+		sense = GRB_EQUAL;
 		for (int v = 0; v < numVehicles; ++v)
 		{
 			ind[nonzero] = assigntest(t,v);
@@ -144,7 +146,7 @@ void buildModel(
 			val[nonzero++] = 1.0;
 		}
 		ind[nonzero] = usevehicle(v);
-		val[nonzero++] = -1.0;
+		val[nonzero++] = -numVehicles;
 		GRBaddconstr(*model, nonzero, ind, val, sense, rhs, cname);
 	}
 
@@ -172,7 +174,7 @@ void buildModel(
 		val[nonzero++] = 1.0;
 		for (int v = 0; v < numVehicles; ++v)
 		{
-			ind[nonzero] = usevehicle(v);
+			ind[nonzero] = assigntest(t,v);
 			val[nonzero++] = -1.0*vehicleArr[v].release;
 		}
 		GRBaddconstr(*model, nonzero, ind, val, sense, rhs, cname);
@@ -183,7 +185,8 @@ void buildModel(
 	{
 		nonzero = 0;
 		sense = GRB_LESS_EQUAL;
-		rhs = testArr[t].deadline - testArr[t].dur;
+		rhs = (double) testArr[t].deadline - (double) testArr[t].dur;
+		// printf("rhs: %.2f\n", rhs);
 		sprintf(cname, "tardiness %i", t);
 		ind[nonzero] = start(t);
 		val[nonzero++] = 1.0;
@@ -217,19 +220,23 @@ void buildModel(
 	{
 		for (int t2 = 0; t2 < t1; ++t2)
 		{
-			nonzero = 0;
-			sense = GRB_LESS_EQUAL;
-			rhs = 1.0;
-			sprintf(cname, "same vehicle %i %i", t1,t2);
-			ind[nonzero] = assigntest(t1);
-			val[nonzero++] = 1.0;
-			ind[nonzero] = assigntest(t2);
-			val[nonzero++] = 1.0;
-			ind[nonzero] = before(t1,t2);
-			val[nonzero++] = -1.0;
-			ind[nonzero] = before(t2,t1);
-			val[nonzero++] = -1.0;
-			GRBaddconstr(*model, nonzero, ind, val, sense, rhs, cname);		
+			for (int v = 0; v < numVehicles; ++v)
+			{
+				nonzero = 0;
+				sense = GRB_LESS_EQUAL;
+				rhs = 1.0;
+				sprintf(cname, "same vehicle %i %i", t1,t2);
+				ind[nonzero] = assigntest(t1,v);
+				val[nonzero++] = 1.0;
+				ind[nonzero] = assigntest(t2,v);
+				val[nonzero++] = 1.0;
+				ind[nonzero] = before(t1,t2);
+				val[nonzero++] = -1.0;
+				ind[nonzero] = before(t2,t1);
+				val[nonzero++] = -1.0;
+				GRBaddconstr(*model, nonzero, ind, val, sense, rhs, cname);		
+			}
+			
 		}
 	}
 
@@ -273,12 +280,12 @@ void buildModel(
 	{
 		for (int t2 = 0; t2 < t1; ++t2)
 		{
-			if (!rehitRules[t1][t2])
+			if (!rehits[t1][t2])
 			{
 				GRBsetdblattrelement(*model, "UB", before(t1,t2), 0.0);
 			}
 
-			if (!rehitRules[t2][t1])
+			if (!rehits[t2][t1])
 			{
 				GRBsetdblattrelement(*model, "UB", before(t2,t1), 0.0);
 			}
@@ -315,10 +322,18 @@ void solve(const char* filepath)
 		rehitRules[i] = malloc(numTests * sizeof(int));
 	}
 
+	read_in_tests(filepath, testArr);
+	read_in_vehicles(filepath, vehicleArr);
+	read_in_rehit_rules(filepath, rehitRules);
+
 	GRBenv* env;
 	GRBmodel* model;
 
 	buildModel(numTests, numVehicles, testArr, vehicleArr, rehitRules, &env, &model);
+
+	GRBupdatemodel(model);
+	/* solve the model */
+	GRBoptimize(model);
 
 
 	/* clear the pointers */
